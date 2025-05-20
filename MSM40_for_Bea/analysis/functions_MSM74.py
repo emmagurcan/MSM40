@@ -19,6 +19,8 @@ from matplotlib import cm
 import matplotlib.colors as colors
 import matplotlib.ticker as mticker
 from matplotlib.ticker import FormatStrFormatter
+import seaborn as sns
+import xarray as xr
 
 max_depth = 800
 num_depth = 800
@@ -222,7 +224,7 @@ def plot_coords(lons, lats, title='Scatter Plot of MSM74', extent=[-70, -25, 50,
     # Show the plot
     plt.show()
 
-def contour_var(lon, depth, var, PD, title, cbar_label, ax=None, colormap = 'coolwarm', x_invt=0, y_invt=1):
+def contour_var(lon, depth, var, PD, title, cbar_label, ax=None, colormap = 'coolwarm', x_invt=0, y_invt=1, max_depth=800):
     mask = (~np.isnan(lon)) & (~np.isnan(depth)) & (~np.isnan(var)) & (~np.isnan(PD)) & \
            (~np.isinf(lon)) & (~np.isinf(depth)) & (~np.isinf(var)) & (~np.isinf(PD))
     lons_clean = lon[mask]
@@ -256,12 +258,15 @@ def contour_var(lon, depth, var, PD, title, cbar_label, ax=None, colormap = 'coo
     ax.set_xlabel("Distance [km]")
     ax.set_ylabel("Depth (m)")
     ax.set_title(title)
+    ax.set_ylim(0, max_depth)
 
     # Invert y-axis if depth increases downward
     if y_invt == 1:
         ax.invert_yaxis()
     if x_invt:
         ax.invert_xaxis()
+
+   
 
 def get_dists(distance, depth, section_num, cruise="MSM74"):
     if section_num == 5 and cruise == "MSM74":
@@ -306,7 +311,16 @@ def plot_section_data(distance, depth, distance_adcp, depth_adcp, temperature, s
     levels = np.linspace(-0.35, 0.35, 65)  
 
     # Define a saturation factor (>1 increases saturation, <1 decreases it)
-    V_plot = axs[1, 1].contourf(distance_grid, depth_grid, v_ortho, levels=levels, cmap="RdBu_r", norm=Normalize(vmin=-0.35, vmax=0.35), extend='both')
+    if section_num == 3:
+        V_plot = axs[1, 1].imshow(v_ortho,
+                                    extent=[distance_adcp[:].min(), distance_adcp[:].max(), depth_adcp[:].max(), depth_adcp[:].min()],
+                                    aspect='auto',
+                                    cmap="RdBu_r",
+                                    norm=plt.Normalize(-0.22, 0.22),
+                                    origin='upper'  # or 'lower', depending on your depth axis orientation
+                                    )
+    else:
+        V_plot = axs[1, 1].contourf(distance_grid, depth_grid, v_ortho, levels=levels, cmap="RdBu_r", norm=Normalize(vmin=-0.35, vmax=0.35), extend='both')
 
     # V_plot = axs[1, 1].contourf(distance_grid, depth_grid, v_ortho, levels=levels, cmap='RdBu_r', extend='both')
     cbar = plt.colorbar(V_plot, ax=axs[1, 1])
@@ -347,6 +361,8 @@ def plot_section_data(distance, depth, distance_adcp, depth_adcp, temperature, s
     axs[1, 1].set_ylabel('Depth (m)', fontsize=12)
     axs[1, 1].invert_yaxis()
 
+    
+
     if inv_x:
         axs[1, 1].invert_xaxis()
 
@@ -357,7 +373,7 @@ def plot_section_data(distance, depth, distance_adcp, depth_adcp, temperature, s
     # print(f"Saved figure to plots/section_{section_num} ")
     plt.show()
 
-def plot_sectionMSM40(distance, depth, distance_adcp, depth_adcp, PT, S, PD, v_ortho, section_num, inv_x=0, depth_max_adcp=300, depth_max=300):
+def plot_sectionMSM40(distance, depth, distance_adcp, depth_adcp, PT, S, PD, v_ortho, section_num, inv_x=0, depth_max_adcp=300, depth_max=300, offset=0):
     # Plot the figure
     fig, ax = plt.subplots(2, 2, figsize=(20, 16))
     plt.suptitle(f"MSM40 Section {section_num}")
@@ -414,7 +430,9 @@ def plot_sectionMSM40(distance, depth, distance_adcp, depth_adcp, PT, S, PD, v_o
     ax[0, 1].clabel(contour_lines, inline=True, fmt='%1.1f', fontsize=11)
     contour_lines = ax[0, 1].contour(distance, depth, PD, levels=contour_levels, colors='k', linewidths=0.8)
     ax[1, 0].clabel(contour_lines, inline=True, fmt='%1.1f', fontsize=11)
-    contour_lines = ax[1, 1].contour(distance, depth, PD, levels=contour_levels, colors='k', linewidths=0.8)
+
+    distance_aligned = distance + offset
+    contour_lines = ax[1, 1].contour(distance_aligned, depth, PD, levels=contour_levels, colors='k', linewidths=0.8)
     ax[1, 1].clabel(contour_lines, inline=True, fmt='%1.1f', fontsize=11)
     plt.tight_layout()
     plt.savefig(f'/Users/emmagurcan/Documents/France/ENS/M1/stageM1/analysis/plots/MSM40/section_{section_num}')
@@ -564,9 +582,6 @@ def get_woa_ref(lon_ctd, lat_ctd, lon_woa, lat_woa, var, max_radius=10):
             if best_profile is None:
                 best_profile = selected_profile
                 best_lat, best_lon = lat_woa[selected_lat_idx], lon_woa[selected_lon_idx]
-
-    # If no valid profile is found, return the closest one anyway
-    print("Warning: All WOA profiles contain missing values. Returning the closest one anyway.")
     return best_profile, best_lon, best_lat
 
 def get_alternate_woa_ref(lon_ctd, lat_ctd, lon_woa, lat_woa, var, 
@@ -962,8 +977,6 @@ def load_data(section_num, lonlatev, ds_ctd, ds_adcp):
 
     adcp_lats = ds_adcp['LATITUDE']
     adcp_lons = ds_adcp['LONGITUDE']
-
-
     depth_adcp = ds_adcp['DEPTH']
 
     adcp_sec = np.where((adcp_lons<np.nanmax(lon))
@@ -1004,7 +1017,7 @@ def snip_data(dist, depth, section, ortho_vel, lon_adcp, lat_adcp, distance_adcp
 
 
     # Snip the data
-    dist, depth, ortho_vel, lon_adcp, lat_adcp, distance_adcp = dist[snip_ctd:], depth[snip_ctd:], ortho_vel[:, snip_adcp:], lon_adcp[snip_adcp:], lat_adcp[:snip_adcp:], distance_adcp[snip_adcp:]
+    dist, depth, ortho_vel, lon_adcp, lat_adcp, distance_adcp = dist[snip_ctd:], depth[snip_ctd:], ortho_vel[:, snip_adcp:], lon_adcp[snip_adcp:], lat_adcp[snip_adcp:], distance_adcp[snip_adcp:]
     vars = [var[snip_ctd:] for var in vars]
     
 
@@ -1303,147 +1316,116 @@ def plot_anomalies1(distance, ind_Z, anom_temp, anom_sal, anom_dens, depth, sigm
     plt.tight_layout()
     plt.show()
 
-def plot_anomalies(distance, ind_Z, anom_temp, anom_sal, anom_dens, depth, sigma0, v_ortho, depth_adcp, distance_adcp, section_num, saturation = 0.25, saturationd=0.6, inv_x=0, depth_cutoff=-450, cruise="MSM74",depth_max_adcp=-300, depth_min_adcp=30):
+def plot_anomalies(distance, ind_Z, anomalyt, anomalys, anom_dens, depth, sigma_grid, v_ortho, depth_adcp, distance_adcp, section_num, saturation = 1.0, saturationd=0.6, inv_x=0, depth_cutoff=-450, cruise="MSM74",depth_max_adcp=300, depth_min_adcp=30, offset=0):
     depth = -1 * depth
     ndepth = get_numdepth()
     mdepth = get_maxdepth()
     
-    saturationt = saturation
-    saturations = saturation
-    if cruise == "MSM74":
-        indxs = np.where(ind_Z > depth_cutoff)
-        anom_temp = anom_temp[indxs, :].squeeze()
-        anom_sal = anom_sal[indxs, :].squeeze()
-        ind_Z = ind_Z[indxs]
-
-        inddepth = np.where(depth > depth_cutoff)
-        contour_dist = distance[inddepth]
-        contour_depth = depth[inddepth]
-        contour_sigma0 = sigma0[inddepth]
-        
-        anom_dens = anom_dens[indxs, :].squeeze()
-
-        if section_num == 1:
-            # Filter out non-finite values
-            finite_indices = np.isfinite(contour_sigma0)
-            contour_dist = contour_dist[finite_indices]
-            contour_depth = contour_depth[finite_indices]
-            contour_sigma0 = contour_sigma0[finite_indices]
-    # else:
-        # if section_num == 6:
-        #     saturationt = saturation
-        #     saturations = -1*saturation 
-
+    saturationt = 0.6
+    saturations = 1.0
+    if cruise == "MSM40":
+        distance_aligned = distance + offset
+    else:
+        distance_aligned = distance
     
-    fig, axs = plt.subplots(2, 2, figsize=(14, 10))
+    fig, axs = plt.subplots(2, 2, figsize=(16, 12))
     
     # Temperature Anomaly
-    min1 = saturationt * np.nanmin(anom_temp)
-    n2 = Normalize(vmin=min1, vmax=-1 * min1)
-    ct2 = axs[0, 0].contourf(np.unique(distance), ind_Z, anom_temp, cmap='coolwarm',
-                             levels=np.linspace(min1, -1 * min1, 101), norm=n2, extend='both')
-    
+    abs_max = np.nanmax(np.abs(anomalyt))
+    n3 = Normalize(vmin=-saturationt* abs_max, vmax=saturationt* abs_max)
+    levels = np.linspace(-saturationt* abs_max, saturationt *abs_max, 101)
+    ct2 = axs[0, 0].contourf(
+        distance,
+        -1 * ind_Z,
+        anomalyt,
+        cmap='coolwarm',
+        levels=levels,
+        norm=n3,
+        extend='both'
+    )
+
     plt.colorbar(ct2, ax=axs[0, 0]).set_label("\u00b0C")
-    axs[0, 0].set_title('Temperature Anomaly')
-    axs[0, 0].set_ylabel('Depth [m]')
-    axs[0, 0].set_xlabel('Distance [km]')
+    axs[0, 0].set_title('Temperature Anomaly',  fontsize=20)
+    axs[0, 0].set_ylabel('Depth [m]', fontsize=15)
+    axs[0, 0].set_xlabel('Distance [km]', fontsize=15)
     # axs[0, 0].invert_yaxis()
 
     # Salinity Anomaly
-    min2 = saturations * np.nanmin(anom_sal)
-    n1 = Normalize(vmin=min2, vmax=-1 * min2)
-    ct1 = axs[0, 1].contourf(np.unique(distance), ind_Z, anom_sal, cmap='coolwarm',
-                             levels=np.linspace(min2, -1 * min2, 101), norm=n1, extend='both')
-    
-    plt.colorbar(ct1, ax=axs[0, 1]).set_label("psu")
-    axs[0, 1].set_title('Salinity Anomaly')
-    axs[0, 1].set_ylabel('Depth [m]')
-    axs[0, 1].set_xlabel('Distance [km]')
+    abs_max = np.nanmax(np.abs(anomalys))
+    n3 = Normalize(vmin=-saturations* abs_max, vmax=saturations* abs_max)
+    levels = np.linspace(-saturations* abs_max, saturations *abs_max, 101)
+    ct3 = axs[0, 1].contourf(
+        distance,
+        -1 * ind_Z,
+        anomalys,
+        cmap='coolwarm',
+        levels=levels,
+        norm=n3,
+        extend='both'
+    )
+
+    plt.colorbar(ct3, ax=axs[0, 1]).set_label("psu")
+    axs[0, 1].set_title('Salinity Anomaly',  fontsize=20)
+    axs[0, 1].set_ylabel('Depth [m]', fontsize=15)
+    axs[0, 1].set_xlabel('Distance [km]', fontsize=15)
     # axs[0, 1].invert_yaxis()
 
     # Density Anomaly
     if cruise == "MSM40":
         ind_Z = np.linspace(0, -1*ndepth, ndepth)
+
     min3 = saturationd* np.nanmin(anom_dens)
     n3 = Normalize(vmin=min3, vmax=-1 * min3)
-    ct3 = axs[1, 0].contourf(np.unique(distance), ind_Z, anom_dens, cmap='coolwarm',
+    ct3 = axs[1, 0].contourf(distance, ind_Z, anom_dens, cmap='coolwarm',
                              levels=np.linspace(min3, -1 * min3, 101), norm=n3, extend='both') 
     
     plt.colorbar(ct3, ax=axs[1, 0]).set_label("kg/m³")
     if cruise == "MSM40":
         axs[0, 0].set_ylim(depth_max_adcp, 0)
         axs[0, 1].set_ylim(depth_max_adcp, 0)
-        axs[1, 0].set_ylim(depth_max_adcp, 0)
+        axs[1, 0].set_ylim(-depth_max_adcp, 0)
         axs[1, 1].set_ylim(depth_max_adcp, 0)
-    axs[1, 0].set_title('Density Anomaly')
-    axs[1, 0].set_ylabel('Depth [m]')
-    axs[1, 0].set_xlabel('Distance [km]')
-    # axs[1, 0].invert_yaxis()
+    levels = np.linspace(-0.35, 0.35, 65)
+    V_plot = axs[1, 1].imshow(v_ortho,
+                            extent=[distance_adcp.min(), distance_adcp.max(), depth_adcp.max(), depth_adcp.min()],
+                            aspect='auto',
+                            cmap="RdBu_r",
+                            norm=plt.Normalize(-0.22, 0.22),
+                            origin='upper'  # or 'lower', depending on your depth axis orientation
+                            )
+    contour_levels = np.arange(23, 28, 0.1)
 
+    clines = axs[0, 0].contour(distance, -1*depth, sigma_grid, levels=contour_levels, colors='k', linewidths=0.8)
+    axs[0, 0].clabel(clines, inline=True, fmt='%1.1f', fontsize=11)
+
+    clines = axs[0, 1].contour(distance, -1*depth, sigma_grid, levels=contour_levels, colors='k', linewidths=0.8)
+    axs[1, 0].clabel(clines, inline=True, fmt='%1.1f', fontsize=11)
+
+    clines = axs[1, 0].contour(distance, depth, sigma_grid, levels=contour_levels, colors='k', linewidths=0.8)
+    axs[0, 1].clabel(clines, inline=True, fmt='%1.1f', fontsize=11)
 
     if cruise == "MSM40":
-        # Orthogonal Velocity
-        distance_grid, depth_grid = np.meshgrid(distance_adcp, depth_adcp)
-        V_plot = axs[1, 1].contourf(distance_grid, -1 * depth_grid, v_ortho, levels=np.linspace(-0.4, 0.4, 80), cmap='RdBu_r', extend='both')
-        plt.colorbar(V_plot, ax=axs[1, 1]).set_label('Orthogonal Velocities (m/s)')
-        axs[1, 1].set_title("Orthogonal Velocity")
-        # axs[1, 1].invert_yaxis()
-        
-        axs[1, 1].set_ylabel('Depth [m]')
-        axs[1, 1].set_xlabel('Distance [km]')
-        # Add isopycnes contours
-        contour_levels = np.arange(23.1, 28, 0.1)
-        contour_lines1 = axs[0, 0].contour(distance, depth, sigma0, levels=contour_levels, colors='k', linewidths=0.3)
-        contour_lines2 = axs[1, 0].contour(distance, depth, sigma0, levels=contour_levels, colors='k', linewidths=0.3)
-        contour_lines3 = axs[0, 1].contour(distance, depth, sigma0, levels=contour_levels, colors='k', linewidths=0.3)
-        contour_lines4 = axs[1, 1].contour(distance, depth, sigma0, levels=contour_levels, colors='k', linewidths=0.3)
-        axs[0, 0].clabel(contour_lines1, inline=True, fmt='%1.1f', fontsize=8)
-        axs[0, 1].clabel(contour_lines2, inline=True, fmt='%1.1f', fontsize=8)
-        axs[1, 0].clabel(contour_lines3, inline=True, fmt='%1.1f', fontsize=8)
-        axs[1, 1].clabel(contour_lines4, inline=True, fmt='%1.1f', fontsize=8)
-
+         d = -depth
     else:
-        # Define a saturation factor (>1 increases saturation, <1 decreases it)
-        levels = np.linspace(-0.35, 0.35, 65)  
-        distance_grid, depth_grid = np.meshgrid(distance_adcp, depth_adcp)
-        V_plot = axs[1, 1].contourf(distance_grid, depth_grid, v_ortho, levels=levels, cmap="RdBu_r", norm=Normalize(vmin=-0.35, vmax=0.35), extend='both')
-        cbar4 = fig.colorbar(V_plot, ax=axs[1, 1], label='Velocity (m/s)')
-        cbar4.set_label('Velocity (m/s)')
-        cbar4.ax.tick_params(labelsize=18)
-        axs[1, 1].set_xlabel('Distance [km]')
-        axs[1, 1].set_ylabel('Depth (m)')
-        axs[1, 1].set_title('Orthogonal Velocity')
-        axs[1, 1].set_ylim(depth_min_adcp, depth_max_adcp)
-        # axs[1, 1].set_ylim(depth_min_adcp, depth_max_adcp)
-        axs[1, 1].invert_yaxis() 
-        axs[1, 1].tick_params(axis='both', which='major')
-        
+         d = depth
+    clines = axs[1, 1].contour(distance_aligned, d, sigma_grid, levels=contour_levels, colors='k', linewidths=0.8)
+    axs[1, 1].clabel(clines, inline=True, fmt='%1.1f', fontsize=11)
+    cbar = plt.colorbar(V_plot, ax=axs[1, 1])
+    axs[1, 1].set_xlabel('Distance [km]', fontsize=15)
+    axs[1, 1].set_ylabel('Depth [m]', fontsize=15)
+    axs[1, 1].set_title("Orthogonal Velocity", fontsize=20)
+    cbar.set_label('Orthogonal Velocities (m/s)')
 
-        clines = axs[0, 0].tricontour(contour_dist, contour_depth, contour_sigma0, levels=np.arange(23, 28, 0.1), colors='k', linewidths=0.8)
-        clines2 = axs[0, 1].tricontour(contour_dist, contour_depth, contour_sigma0, levels=np.arange(23, 28, 0.1), colors='k', linewidths=0.8)
-        clines3 = axs[1, 0].tricontour(contour_dist, contour_depth, contour_sigma0, levels=np.arange(23, 28, 0.1), colors='k', linewidths=0.8)
-        clines4 = axs[1, 1].tricontour(contour_dist, -1*contour_depth, contour_sigma0, levels=np.arange(23, 28, 0.1), colors='k', linewidths=0.8)
-        axs[0, 0].clabel(clines, inline=True, fmt='%1.1f', fontsize=11)
-        axs[0, 1].clabel(clines2, inline=True, fmt='%1.1f', fontsize=11)
-        axs[1, 0].clabel(clines3, inline=True, fmt='%1.1f', fontsize=11)
-        axs[1, 1].clabel(clines4, inline=True, fmt='%1.1f', fontsize=11)
+    axs[1, 0].set_title('Density Anomaly', fontsize=20)
+    axs[1, 0].set_ylabel('Depth [m]',fontsize=15)
+    axs[1, 0].set_xlabel('Distance [km]',fontsize=15)
+    if cruise != "MSM40":
+        axs[0, 0].invert_yaxis()
+        axs[0, 1].invert_yaxis()
 
-    if inv_x:
-        axs[0, 0].invert_xaxis()
-        axs[0, 1].invert_xaxis()
-        axs[1, 0].invert_xaxis()
-        axs[1, 1].invert_xaxis()
-    firsts = get_dists(distance, depth, section_num)
-    ys1 = np.ones_like(firsts)
-    ys = ys1 * -8
-    axs[0, 0].scatter(firsts, ys, color="orange", s=5, zorder=10)
-    axs[0, 1].scatter(firsts, ys, color="orange", s=5, zorder=10)
-    axs[1, 0].scatter(firsts, ys, color="orange", s=5, zorder=10)
-    # axs[1, 1].scatter(firsts, ys, color="orange", s=5, zorder=10)
-    plt.suptitle(f"Anomalies for {cruise} Section {section_num}")
-
+    plt.suptitle(f"Anomalies for {cruise} Section {section_num}", fontsize=20)
     plt.tight_layout()
-    plt.show()
+
 
 def plot_eddy(ax, xs, zs, var, sigma_grid, title, cbar_label, colormap, start_eddy, end_eddy, eddy_z_min, eddy_z, inv_x=0):
     X, Z = np.meshgrid(xs, zs)
@@ -1620,7 +1602,7 @@ def plot_ts_diagrams(sal_eddy, temp_eddy, zs_eddy, sal_other, temp_other, zs_oth
 
 
 # Function to plot 2D contour
-def plot_contour(ax, x, y, var, sigma0, title, cbar_label, colormap, inv_x):
+def plot_contour(ax, x, y, var, sigma0, title, cbar_label, colormap, inv_x=0):
     X, Y = np.meshgrid(x, y)
     contour = ax.contourf(X, Y, var, levels=40, cmap=colormap)
     cbar = plt.colorbar(contour, ax=ax)
@@ -1656,8 +1638,6 @@ def contour_3d(distance, depth, distance_adcp, depth_adcp, temperature, salinity
     fig, axs = plt.subplots(2, 2, figsize=(12, 10))
     plt.suptitle(f"MSM74 Section {section_num}")
     
-    
-    
     # Temperature
     axs[0, 0].set_title("Temperature")
     plot_contour(axs[0, 0], distance, depth, temperature, sigma0, "Temperature", "Temperature (°C)", 'cmo.thermal')
@@ -1673,19 +1653,31 @@ def contour_3d(distance, depth, distance_adcp, depth_adcp, temperature, salinity
     # Orthogonal Velocity
     axs[1, 1].set_title("Orthogonal Velocity")
     distance_grid, depth_grid = np.meshgrid(distance_adcp, depth_adcp)
-    levels_velocity = np.arange(-1, 1.1, 0.1)
-    V_plot = axs[1, 1].contourf(distance_grid, depth_grid, v_ortho, levels=levels_velocity, cmap='coolwarm', extend='both')
-    cbar = plt.colorbar(V_plot, ax=axs[1, 1])
-    cbar.set_label('Orthogonal Velocities (m/s)', fontsize=12)
+    levels = np.linspace(-0.35, 0.35, 65)
+    # V_plot = ax2.contourf(distance_grid, depth_grid, v_ortho, levels=levels, cmap="RdBu_r", norm=Normalize(vmin=-0.35, vmax=0.35), extend='both')
+    V_plot = axs[1, 1].imshow(v_ortho,
+                            extent=[distance_adcp.min(), distance_adcp.max(), depth_adcp.max(), depth_adcp.min()],
+                            aspect='auto',
+                            cmap="RdBu_r",
+                            norm=plt.Normalize(-0.22, 0.22),
+                            origin='upper'  # or 'lower', depending on your depth axis orientation
+                            )
+  
     
     contour_levels = np.arange(23, 28, 0.1)
-    clines = axs[1, 1].contour(distance_grid, depth_grid, sigma0[:depth_adcp.size, :distance_adcp.size],
-                                levels=contour_levels, colors='k', linewidths=0.8)
+    clines = axs[1, 1].contour(distance, depth, sigma0, levels=contour_levels, colors='k', linewidths=0.8)
     axs[1, 1].clabel(clines, inline=True, fmt='%1.1f', fontsize=11)
+
+    cbar = plt.colorbar(V_plot, ax=axs[1, 1])
+    cbar.set_label('Orthogonal Velocities (m/s)', fontsize=12)
+
     axs[1, 1].set_ylim(depth_min_adcp, depth_max_adcp)
     axs[1, 1].set_xlabel('Distance (km)', fontsize=12)
     axs[1, 1].set_ylabel('Depth (m)', fontsize=12)
+    axs[1, 1].set_ylim(30, 300)
     axs[1, 1].invert_yaxis()
+    
+
     if inv_x:
         axs[1, 1].invert_xaxis()
     
@@ -1743,27 +1735,6 @@ def compute_orthogonal_velocity(lon, lat, u_adcp, v_adcp):
     
     return v_perp
 
-# def determine_distance(lon, lat, inv_x, section_num):
-#     # d1 = np.sin(lat*(math.pi/180))*np.sin(lat[0]*(math.pi/180))
-#     # d2 = np.cos(lat*(math.pi/180))*np.cos(lat[0]*(math.pi/180)) * \
-#     #     np.cos(abs(lon[0]-lon)*(math.pi/180))
-#     # distance = 6371*np.arccos(d1+d2)
-#     # return distance
-#     if section_num == 5:
-#         inv_x = 0
-#     if not inv_x:
-#         first_lat = np.nanmin(lat)
-#         first_lon = np.nanmin(lon)
-#     else:
-#         first_lat = np.nanmax(lat)
-#         first_lon = np.nanmax(lon)
-
-#     d1 = np.sin(lat*(math.pi/180))*np.sin(first_lat*(math.pi/180))
-#     d2 = np.cos(lat*(math.pi/180))*np.cos(first_lat*(math.pi/180)) * \
-#         np.cos(abs(first_lon-lon)*(math.pi/180))
-#     distance = 6371*np.arccos(d1+d2)
-#     return distance
-
 def determine_distance(lon, lat, inv_x, section_num):
     if section_num == 5:
         inv_x = 0
@@ -1808,127 +1779,6 @@ def correct(section_num, adcp_sec, LON_75):
         return adcp_sec[ind7]
     else:
         return adcp_sec
-
-def get_eddies(section_num, cruise, sub_section=None):
-    if cruise == "MSM74":
-        if section_num == 2:
-            eddies = {1: (50, 220, 20, 120), 2: (219, 210, 60, 90), 3: (369, 120, 20, 90)}
-            return eddies
-        if section_num == 3:
-            eddies = {1: (255, 200, 70, 140)}
-            return eddies
-        if section_num == 4:
-            print(f"No eddies in {cruise} section {section_num}")
-            return None
-        if section_num == 5:
-            eddies = {1: (165, 85, 29, 35), 2: (80, 110, 8, 50)}
-            return eddies
-        if section_num == 6:
-            print(f"No eddies in {cruise} section {section_num}")
-            return None
-        if section_num == 7:
-            eddies = {1: (115, 280, 10, 150), 2: (200, 100, 10, 60), 3: (268, 190, 10, 100)}
-            return eddies
-    if cruise == "MSM40":
-        if section_num == 1:
-            eddies = {1: (120, 15, 10, 5), 2: (143, 20, 10, 8), 3: (280, 90, 20, 69), 4: (390, 70, 25, 50)}
-            return eddies
-        if section_num == 2:
-            print(f"No eddies in {cruise} section {section_num}")
-            return None
-        if section_num == 3:
-            eddies = {1: (200, 45, 10, 45), 2: (265, 40, 10, 25), 3: (375, 40, 10, 25), 4: (445, 30, 10, 24)}
-            return eddies
-        if section_num == 4:
-            eddies = {1: (15, 30, 10, 15), 2: (45, 40, 15, 30), 3: (80, 25, 12, 23), 4: (120, 45, 16, 25), 5: (234, 40, 18, 22)}
-            return eddies
-        if section_num == 5:
-            print(f"See Julian's extensive work")
-            return None
-        if section_num == 6:
-            print(f"No eddies in {cruise} section {section_num}")
-            return None
-        if section_num == 7:
-            if sub_section == 3:
-                eddies = {1: (115, 220, 15, 100), 2: (137, 80, 18, 50), 3: (260, 90, 25,70)}
-            if sub_section == 2:
-                eddies = {1: (25, 65, 14, 20), 2: (180, 90, 18, 55), 3: (260, 70, 18, 30), 4: (335, 120, 50, 90)}
-            if sub_section == 1:
-                eddies = {1: (50, 165, 30, 140), 2: (150, 200, 30, 140), 3: (325, 160, 30, 140)}
-            return eddies 
-
-def plot_eddy_selected(ax, xs, zs, anomalyt, temp_eddy, sigma_grid, distance, ind_Z, title, cbar_label, c, cruise, section_num, depth, cmap=None, ylimmax=300, inv_x=0):
-    # if ylimmax is None:
-    #     ylimmax = np.max(zs)
-    
-    X, Z = np.meshgrid(xs, ind_Z)
-    # contour = ax.contourf(X, Z, anomalyt, cmap=colormap, levels=levels, extend='both')
-    # min1 = 0.7 * np.nanmin(anomalyt)
-    # print(min1)
-    # n2 = Normalize(vmin=min1, vmax=-1 * min1)
-    # contour = ax.contourf(np.unique(distance), ind_Z, anomalyt, cmap='coolwarm',
-    #                             levels=np.linspace(min1, -1 * min1, 101), norm=n2, extend='both')
-        
-    # plt.colorbar(contour)
-
-    # # cbar = plt.clabel(contour)
-    # plt.xlabel("Distance [km]")
-    # plt.ylabel("Depth [m]")
-    # plt.title("Temeprature Anomalies with Mean Section Reference")
-    # contour_levels = np.arange(23, 28, 0.1)
-    # clines = plt.contour(xs, -1*zs, sigma_grid, levels=contour_levels, colors='k', linewidths=0.8)
-    min1 = 0.7 * np.nanmin(anomalyt)
-    n2 = Normalize(vmin=min1, vmax=-1 * min1)
-
-    if cruise == "MSM74":
-        xs = get_dists(distance, depth, section_num)
-    else:
-        xs = np.unique(distance)
-    contour = ax.contourf(xs, -1*ind_Z, anomalyt, cmap='coolwarm',
-                                levels=np.linspace(min1, -1 * min1, 101), norm=n2, extend='both')
-        
-    # plt.colorbar(contour)
-    if c == "orange":
-        cbar = plt.colorbar(contour, ax=ax)
-        cbar.set_label(cbar_label)
-        cbar.ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('%.1f'))
-    
-
-    # Highlight temp_eddy in green
-    # Create a binary mask where temp_eddy has values (non-NaN)
-    masked_eddy = np.where(np.isnan(temp_eddy), np.nan, 1)  # 1 where data exists, NaN elsewhere
-
-    mask = ~np.isnan(temp_eddy)
-
-    # Smooth/expand the mask slightly to avoid gaps (optional)
-    mask_dilated = scipy.ndimage.binary_dilation(mask)
-
-    # Convert mask to float (needed for contouring)
-    mask_float = mask_dilated.astype(float)
-
-    ax.contour(xs, -1 * ind_Z, mask_float, levels=[0.5], colors=c, linewidths=2, zorder=11)
-    # highlight = ax.pcolormesh(xs, -1*ind_Z, temp_eddy, cmap=c, shading='auto', alpha=0.22, zorder=10)
-        
-    # Plot density contours
-    if cruise == "MSM40":
-        contour_levels = np.arange(23, 28, 0.1)
-    else:
-        contour_levels = np.arange(23, 28, 0.1)
-    clines = ax.contour(X, Z, sigma_grid, levels=contour_levels, colors='k', linewidths=0.8)
-    firsts = get_dists(distance, depth, section_num, cruise="MSM40")
-    ys = np.ones_like(firsts)
-    ys = ys * 8
-    ax.scatter(firsts, ys, color="red", s=6, zorder=10)
-    ax.clabel(clines, inline=True, fmt='%1.1f', fontsize=11)
-    
-    ax.set_xlabel("Distance [km]", fontsize=15)
-    ax.set_ylabel("Depth [m]", fontsize=15)
-    ax.set_title(title, fontsize=20)
-    ax.set_ylim(0, ylimmax)
-    ax.invert_yaxis()
-    
-    if inv_x:
-        ax.invert_xaxis()
 
 def plot_ts_diagrams_anom(anomalyt, sal_eddy, temp_eddy3d, temp_eddy, zs_eddy, sal_other, temp_other, zs_other, xs, zs, t_grid, s_grid, sigma_grid, distance, depth, ind_Z, cruise, section_num, pos_anom, eddy_num, ylimmax = 4, ylimmin = 3, xlimmax = 35, xlimmin = 34, inv_x=0, cmap='coolwarm', clabel="Celsius"):
     if pos_anom:
@@ -2065,17 +1915,600 @@ def plot_ts_diagrams_anom(anomalyt, sal_eddy, temp_eddy3d, temp_eddy, zs_eddy, s
     ax3.set_title(r'$\theta-S$ diagram', fontsize=20)
 
     ax3.set_xlim(33.5, 35.5)
-    # ax3.set_ylim(2, np.nanmax(temp_eddy3d) + 0.5)
-    # ax3.set_ylim(ylimmin, ylimmax)
-    # ax3.set_xlim(xlimmin, xlimmax)
-    # ax3.set_xlim(np.nanmin(s_grid)-0.1, np.nanmax(s_grid)+0.1)
-    
-
     sc1.set_label('core of the eddy')
     sc2.set_label('reference profile')
 
     # Add legends
     ax3.legend(loc='upper right', fontsize='small')
+
+    # Adjust layout and show the plot
+    plt.tight_layout()
+    plt.show()
+
+def create_ref_profile(var_grid, distance, lon, lat, x_min, x_max):
+    sel_idxs = np.where((distance < x_max) & (distance > x_min))
+    lons = lon[sel_idxs].squeeze()
+    lats = lat[sel_idxs].squeeze()
+    ref_profile = var_grid[:, sel_idxs].squeeze()
+    return np.mean(ref_profile, axis=1), np.mean(lons), np.mean(lats)
+
+def find_closest_val(arr, target):
+    return np.abs(arr.astype(int) - target).argmin()
+
+def unique_preserve_order(arr):
+    _, idx = np.unique(arr, return_index=True)
+    return arr[np.sort(idx)]
+ 
+def plot_eddy_selected(ax, xs, zs, contour, anomalyt, temp_eddy, sigma_grid, distance, ind_Z, title, cbar_label, c, cruise, section_num, depth, cmap=None, ylimmax=300, inv_x=0):
+    # Define X and Z grid (for contours)
+    X, Z = np.meshgrid(xs, ind_Z)
+
+    firsts = get_dists(distance, depth, section_num, cruise="MSM40")
+    ys = np.ones_like(firsts) * 8
+    ax.scatter(firsts, ys, color="red", s=6, zorder=10)
+
+    # Create a binary mask where eddy is defined (not NaN)
+    mask = ~np.isnan(temp_eddy)
+
+    # Create X, Z grid for the mask
+    X, Z = np.meshgrid(xs, -1 * ind_Z)
+
+    # Plot just the outer edge
+    contours = ax.contour(X, Z, mask.astype(int), levels=[0.5], colors=c, linewidths=2, zorder=11)
+
+
+    # Axes labels and formatting
+    ax.set_xlabel("Distance [km]", fontsize=15)
+    ax.set_ylabel("Depth [m]", fontsize=15)
+    ax.set_title(title, fontsize=20)
+    ax.set_ylim(0, ylimmax)
+    ax.invert_yaxis()
+
+    if inv_x:
+        ax.invert_xaxis()
+
+# def plot_eddy_selected(ax, xs, zs, anomalyt, temp_eddy, sigma_grid, distance, ind_Z, title, cbar_label, c, cruise, section_num, depth, cmap=None, ylimmax=300, inv_x=0):
+#     import numpy as np
+#     import matplotlib.pyplot as plt
+#     import matplotlib.ticker as mticker
+#     import scipy.ndimage
+
+#     # Define X and Z grid (for contours)
+#     X, Z = np.meshgrid(xs, ind_Z)
+
+#     # Plot the anomaly field
+#     min1 = 0.76 * np.nanmin(anomalyt)
+#     n2 = plt.Normalize(vmin=min1, vmax=-1 * min1)
+#     contour = ax.contourf(distance, -1 * ind_Z, anomalyt, cmap='coolwarm',
+#                           levels=np.linspace(min1, -1 * min1, 101), norm=n2, extend='both')
+
+#     # Colorbar
+#     if c == "orange":
+#         cbar = plt.colorbar(contour, ax=ax)
+#         cbar.set_label(cbar_label)
+#         cbar.ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('%.1f'))
+
+#     # Masked eddy: binary mask where temp_eddy is not NaN
+#     firsts = get_dists(distance, depth, section_num, cruise="MSM40")
+#     ys = np.ones_like(firsts) * 8
+#     ax.scatter(firsts, ys, color="red", s=6, zorder=10)
+
+#     # Create a binary mask where eddy is defined (not NaN)
+#     mask = ~np.isnan(temp_eddy)
+
+#     # Create X, Z grid for the mask
+#     X, Z = np.meshgrid(xs, -1 * ind_Z)
+
+#     # Plot just the outer edge
+#     contours = ax.contour(X, Z, mask.astype(int), levels=[0.5], colors=c, linewidths=2, zorder=11)
+
+#     # Plot density contours
+#     contour_levels = np.arange(23, 28, 0.1)
+#     clines = ax.contour(X, Z, sigma_grid, levels=contour_levels, colors='k', linewidths=0.8)
+
+#     # Label contours
+#     ax.clabel(clines, inline=True, fmt='%1.1f', fontsize=11)
+
+#     # Axes labels and formatting
+#     ax.set_xlabel("Distance [km]", fontsize=15)
+#     ax.set_ylabel("Depth [m]", fontsize=15)
+#     ax.set_title(title, fontsize=20)
+#     ax.set_ylim(0, ylimmax)
+#     ax.invert_yaxis()
+
+#     if inv_x:
+#         ax.invert_xaxis()
+
+def get_reference_profile(cruise, section_num, ds, dss, lon, lat, CT, SA, distance, depth, sub_section=0):
+    lon_woa = ds['lon']
+    lat_woa = ds['lat']
+    t_mn = np.squeeze(ds['t_an'])
+    s_mn = np.squeeze(dss['s_an'])
+    depth_ref = ds['depth']
+    tref, lon_sel, lat_sel = get_woa_ref(lon, lat, lon_woa, lat_woa, t_mn)
+    sref, lon_woa_sels, lat_woa_sels = get_woa_ref(lon, lat, lon_woa, lat_woa, s_mn)
+
+    tref[tref > 100] = np.nan
+    sref[sref > 100] = np.nan
+
+    if cruise == "MSM74" and section_num == 3:
+        tref, lon_sel, lat_sel = create_ref_profile(CT, distance, lon, lat, 0, 450)
+        sref, lon_sel, lat_sel = create_ref_profile(SA, distance, lon, lat, 0, 450)
+        depth_ref = depth
+    
+    if cruise == "MSM40" and section_num == 4:
+        tref, lon_sel, lat_sel = create_ref_profile(CT, distance, lon, lat, 0, 300)
+        sref, lon_sel, lat_sel = create_ref_profile(SA, distance, lon, lat, 0, 300)
+        depth_ref = depth
+    
+    if cruise == "MSM40" and (section_num == 7 and sub_section ==1):
+        tref, lon_sel, lat_sel = create_ref_profile(CT, distance, lon, lat, 0, 450)
+        sref, lon_sel, lat_sel = create_ref_profile(SA, distance, lon, lat, 0, 450)
+        depth_ref = depth
+    return tref, sref, lon_sel, lat_sel, depth_ref
+
+
+def plot_eddies(anomalyt, anomalys, xs, zs, t_grid, s_grid, sigma_grid, distance, depth, ind_Z, cruise, section_num, depth_max_N2,distance_adcp, depth_adcp, v_ortho, sub_section=None, e=0, ylimmax = 4, ylimmin = 3, xlimmax = 35, xlimmin = 34, inv_x=0, cmap='coolwarm', clabel="Celsius", eddy_depth=30, eddy_x_min=0, eddy_x_max=0, offset=0):
+    original_cmap1 = plt.cm.Reds
+    # cmap1 = colors.ListedColormap(original_cmap1(np.linspace(0.4, 1, 256)))
+    col = ["blue", "orange", "green", "red", "purple", "brown", "yellow"]
+    original_cmap2 = plt.cm.Blues
+    fig, axes = plt.subplots(1, 2, figsize=(18, 6))
+    ax1 = axes[0]
+    eddy_dict = get_eddies(section_num, cruise, sub_section=sub_section)
+    distance_aligned = xs + offset
+    xs = distance_aligned
+    for eddy_num in eddy_dict:
+        eddy_center_x, eddy_center_z, a, b = eddy_dict[eddy_num]
+        eddy_center = (eddy_center_x + offset, eddy_center_z)
+
+        # Get symmetric max for normalization
+        abs_max = np.nanmax(np.abs(anomalyt))
+
+        saturate = 0.7
+
+        # Normalize centered at 0
+        n2 = Normalize(vmin=-saturate* abs_max, vmax=saturate* abs_max)
+
+        # Levels centered at 0
+        levels = np.linspace(-saturate* abs_max, saturate *abs_max, 101)
+        contour = ax1.contourf(
+            xs,
+            -1 * ind_Z,
+            anomalyt,
+            cmap='coolwarm',
+            levels=levels,
+            norm=n2,
+            extend='both'
+        )
+        ax2 = axes[1]
+        distance_grid, depth_grid = np.meshgrid(distance_adcp, depth_adcp)
+        levels = np.linspace(-0.35, 0.35, 65)
+        if section_num == 3 and cruise == "MSM74":
+            V_plot = ax2.imshow(v_ortho,
+                                    extent=[distance_adcp.min(), distance_adcp.max(), depth_adcp.max(), depth_adcp.min()],
+                                    aspect='auto',
+                                    cmap="RdBu_r",
+                                    norm=plt.Normalize(-0.22, 0.22),
+                                    origin='upper'  # or 'lower', depending on your depth axis orientation
+                                    )
+        else:
+            V_plot = ax2.contourf(distance_adcp, depth_adcp, v_ortho,
+                           levels=levels, cmap='RdBu_r', extend='both')
+        temp_eddy_3d, temp_eddy, sal_eddy, dens_eddy, zs_eddy, temp_other, sal_other, dens_other, zs_other = extract_eddy_data_anom(anomalyt, t_grid, s_grid, sigma_grid, xs, ind_Z, eddy_center, a, b, cruise=cruise, section_num=section_num, e=eddy_num, sub_section=sub_section)
+        plot_eddy_selected(ax1, xs, zs, contour, anomalyt, temp_eddy_3d, sigma_grid, distance, ind_Z, f"Eddies in {cruise} Section {section_num}", clabel, col[eddy_num], cruise, section_num, depth, inv_x=inv_x)
+        # plot_eddy_ellip(ax1, xs, zs, temp_eddy_3d, col[eddy_num], sigma_grid, f"Eddy in {cruise} Section {section_num}", "Celsius", "cmo.thermal", eddy_center, a, b, cruise, inv_x=inv_x)
+        temp_eddy_3d, temp_eddy, sal_eddy, dens_eddy, zs_eddy, temp_other, sal_other, dens_other, zs_other = extract_eddy_data_anom(anomalyt, t_grid, s_grid, sigma_grid, distance_aligned, ind_Z, eddy_center, a, b, cruise=cruise, section_num=section_num, e=eddy_num, sub_section=sub_section)
+        # plot_eddy_ellip(ax1, xs, zs, temp_eddy_3d, col[eddy_num], sigma_grid, f"Eddy in {cruise} Section {section_num}", "Celsius", "cmo.thermal", eddy_center, a, b, cruise, inv_x=inv_x)
+        plot_eddy_selected(ax2, distance_aligned, zs, V_plot, anomalyt, temp_eddy_3d, sigma_grid, distance, ind_Z, f"Eddies in {cruise} Section {section_num}", clabel, col[eddy_num], cruise, section_num, depth, inv_x=inv_x)
+        
+    firsts = get_dists(distance_aligned, depth, section_num, cruise="MSM40")
+    ys = np.ones_like(firsts)
+    ys = ys * 8
+    ax1.scatter(firsts, ys, color="red", s=6, zorder=10)
+    
+    ed_shape = np.ones_like(distance_adcp)    
+    ax2.plot(distance_adcp, eddy_depth*ed_shape, color="magenta", linewidth=1.5, linestyle='-.', zorder=10)
+    
+    ax1.plot(distance, depth_max_N2.flatten(), color='hotpink', linewidth=3, label='Max $N^2$')
+    ax1.legend()
+    if cruise == "MSM74":
+        contour_levels = np.arange(23, 28, 0.1)
+    else:
+        if section_num == 1:
+            contour_levels = np.arange(24.0, 28.6, 0.2)
+        elif section_num == 7 and sub_section == 2:
+            contour_levels = np.arange(26.8, 28.6, 0.1)
+        else:
+            contour_levels = np.arange(26.8, 28.6, 0.2)
+
+    clines = ax1.contour(xs, zs, sigma_grid, levels=contour_levels, colors='k', linewidths=0.8)
+    ax1.clabel(clines, inline=True, fmt='%1.1f', fontsize=11)
+
+
+    clines = ax2.contour(distance_aligned, zs, sigma_grid, levels=contour_levels, colors='k', linewidths=0.8)
+    ax2.clabel(clines, inline=True, fmt='%1.1f', fontsize=11)
+
+   
+    ax1.tick_params(axis='both', which='major', labelsize=13)
+
+    cbar = plt.colorbar(contour, ax=ax1)
+    cbar.set_label(clabel)
+    cbar.ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('%.1f'))
+
+    # ax2.invert_yaxis()
+    cbar = plt.colorbar(V_plot, ax=ax2)
+    cbar.set_label('Orthogonal Velocities (m/s)')
+    ax1.set_xlabel("Distance [km]", fontsize=15)
+    ax1.set_ylabel("Depth [m]", fontsize=15)
+
+    ax2.tick_params(axis='both', which='major', labelsize=13)
+    
+    ax2.set_xlabel('Distance [km]', fontsize=15)
+    ax2.set_ylabel('Depth [m]', fontsize=15)
+    ax2.set_title("Orthogonal Velocity", fontsize=20)
+    
+
+    if cruise == "MSM74":
+        ax1.set_ylim(0, 500)
+        ax2.set_ylim(30, 500)
+    else:
+        ax1.set_ylim(0, 300)
+        ax2.set_ylim(20, 300)
+    ax1.invert_yaxis()
+    ax2.invert_yaxis()
+
+    ax1.set_xlim(eddy_x_min, eddy_x_max)
+    ax2.set_xlim(eddy_x_min, eddy_x_max)
+    plt.tight_layout()
+    plt.show()
+
+
+def extract_eddy_data_ellip(xs, zs, temperature, salinity, density, eddy_center, a, b):
+    X, Z = np.meshgrid(xs, -1*zs)
+    x0, z0 = eddy_center
+    ellipsoid_mask = ((X - x0)**2 / a**2 + (Z - z0)**2 / b**2) <= 1
+    temp_eddy = np.where(ellipsoid_mask, temperature, np.nan)
+    sal_eddy = np.where(ellipsoid_mask, salinity, np.nan)
+    dens_eddy = np.where(ellipsoid_mask, density, np.nan)
+    zs_eddy = np.where(ellipsoid_mask, Z, np.nan)
+
+    temp_other = np.where(~ellipsoid_mask, temperature, np.nan)
+    sal_other = np.where(~ellipsoid_mask, salinity, np.nan)
+    dens_other = np.where(~ellipsoid_mask, density, np.nan)
+    zs_other = np.where(~ellipsoid_mask, Z, np.nan)
+    
+    return temp_eddy, temp_eddy.flatten(), sal_eddy.flatten(), dens_eddy.flatten(), zs_eddy.flatten(), temp_other.flatten(), sal_other.flatten(), dens_other.flatten(), zs_other.flatten()
+def get_eddies(section_num, cruise, sub_section=None):
+    if cruise == "MSM74":
+        if section_num == 2:
+            eddies = {1: (60, 190, 80, 100), 2: (325, 90, 50, 40)}
+            return eddies
+        if section_num == 3:
+            eddies = {1: (230, 230, 90, 210)}
+            return eddies
+        if section_num == 4:
+            print(f"No eddies in {cruise} section {section_num}")
+            return None
+        if section_num == 5:
+            eddies = {1: (80, 120, 8, 50), 2: (150, 115, 40, 40)}
+            return eddies
+        if section_num == 6:
+            print(f"No eddies in {cruise} section {section_num}")
+            return None
+        if section_num == 7:
+            eddies = {1: (170, 100, 30, 60), 2: (280, 120, 50, 60)}
+            return eddies
+    if cruise == "MSM40":
+        if section_num == 1:
+            eddies = {1: (120, 40, 15, 50), 2: (162, 60, 12, 60), 3: (400, 70, 60, 180)}
+            return eddies
+        if section_num == 2:
+            print(f"No eddies in {cruise} section {section_num}")
+            return None
+        if section_num == 3:
+            eddies = {1: (170, 70, 30, 50), 2: (375, 45, 9, 25), 3: (460, 30, 15, 35)}
+            return eddies
+        if section_num == 4:
+            eddies = {1: (50, 60, 25, 50), 2: (120, 60, 16, 40), 3: (250, 70, 45, 60)}
+            return eddies
+        if section_num == 5:
+            if sub_section == 1:
+                # eddies = {1: (60, 125, 45, 100),  2: (250, 40, 30, 50), 3: (315, 60, 20, 49), 4: (410, 40, 50, 60)} 
+                eddies = {1: (60, 125, 45, 100),  2: (250, 40, 30, 50), 3: (340, 40, 45, 75)} 
+
+                return eddies
+            if sub_section == 2:
+                eddies = {1: (85, 60, 20, 40), 2: (147, 45, 40, 18), 3: (220, 45, 35, 40), 4: (305, 40, 10, 20)}
+                return eddies
+        if section_num == 6:
+            print(f"No eddies in {cruise} section {section_num}")
+            return None
+        if section_num == 7:
+            if sub_section == 3:
+                eddies = {1: (75, 75, 25, 50), 2: (133, 70, 25, 45), 3: (260, 120, 30,90)}
+            if sub_section == 2:
+                eddies = {1: (28, 65, 18, 34), 2: (180, 90, 25, 55), 3: (260, 70, 18, 30), 4: (340, 120, 65, 90)}
+                return eddies
+            if sub_section == 1:
+                eddies = {1: (50, 165, 30, 140), 2: (150, 50, 40, 40), 3: (325, 160, 30, 110)}
+            return eddies 
+
+
+def extract_eddy_data_anom(temp_anomaly, temperature, salinity, density, xs, ind_Z, eddy_center, a, b, cruise="", section_num = "", e=0, sub_section=0):
+    X, Z = np.meshgrid(xs, -1*ind_Z)
+    x0, z0 = eddy_center
+    ellipsoid_mask = ((X - x0)**2 / a**2 + (Z - z0)**2 / b**2) <= 1
+
+    # Extract anomaly values within the initial eddy range
+    temp_anomaly_eddy = np.where(ellipsoid_mask, temp_anomaly, np.nan)
+    
+    # Find the maximum anomaly value and its location
+    max_anomaly = temp_anomaly_eddy[np.unravel_index(np.nanargmax(np.abs(temp_anomaly_eddy)), temp_anomaly_eddy.shape)]
+
+    # Create a binary mask for regions above 50% of the peak anomaly
+    if max_anomaly < 0:
+        eddy_mask = ellipsoid_mask & (temp_anomaly <= (0.25 * max_anomaly))
+    else:
+        eddy_mask = ellipsoid_mask & (temp_anomaly >= (0.25 * max_anomaly))
+
+    # Extract eddy properties based on refined eddy mask
+    temp_eddy = np.where(eddy_mask, temperature, np.nan)
+    sal_eddy = np.where(eddy_mask, salinity, np.nan)
+    dens_eddy = np.where(eddy_mask, density, np.nan)
+    zs_eddy = np.where(eddy_mask, Z, np.nan)
+    theta = np.linspace(0, 2 * np.pi, 100)
+    ellipsoid_x = x0 + a * np.cos(theta)
+    ellipsoid_z = z0 + b * np.sin(theta)
+
+    temp_other = np.where(~eddy_mask, temperature, np.nan)
+    sal_other = np.where(~eddy_mask, salinity, np.nan)
+    dens_other = np.where(~eddy_mask, density, np.nan)
+    zs_other = np.where(~eddy_mask, Z, np.nan)
+    
+    return (
+        temp_eddy, temp_eddy.flatten(), sal_eddy.flatten(), dens_eddy.flatten(), zs_eddy.flatten(),
+        temp_other.flatten(), sal_other.flatten(), dens_other.flatten(), zs_other.flatten()
+    )
+
+
+def plot_coords_eddies(eddy_lons, eddy_lats, other_lons, other_lats, bathymetry, title='Eddy Locations', extent=[-70, -25, 50, 70], ax=None):
+    bathymetry_data = xr.open_dataset(bathymetry)
+
+    # Extract relevant variables (longitude, latitude, depth)
+    bath_lon = bathymetry_data['lon']
+    bath_lat = bathymetry_data['lat']
+    bath_depth = bathymetry_data['topo']
+
+    # Subset data to region of interest
+    lon_min, lon_max, lat_min, lat_max = extent
+    lon_subset = bath_lon.sel(lon=slice(lon_min, lon_max))
+    lat_subset = bath_lat.sel(lat=slice(lat_min, lat_max))
+    depth_subset = bath_depth.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
+
+    # Generate distinct colors for each eddy using seaborn
+    num_eddies = len(eddy_lons)
+    eddy_colors = sns.color_palette("husl", num_eddies)  # Distinct colors
+
+    # Create figure and axis if not passed
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={'projection': ccrs.PlateCarree()})
+
+    # Plot bathymetric relief
+    c = ax.contourf(lon_subset, lat_subset, depth_subset, transform=ccrs.PlateCarree(), levels=20, cmap='Greys', zorder=0)
+
+    # Set map extent and other features
+    ax.set_extent(extent, crs=ccrs.PlateCarree())
+    ax.coastlines(resolution='50m')
+    gridlines = ax.gridlines(draw_labels=True)
+    gridlines.xlabels_top = False  # Disable top x-axis labels
+    gridlines.ylabels_right = False  
+
+    # Plot eddies
+    for i, (lon_arr, lat_arr) in enumerate(zip(eddy_lons, eddy_lats)):
+        ax.scatter(lon_arr, lat_arr, color=eddy_colors[i], s=15, alpha=0.7, label=f'Eddy {i+1}', zorder=10)
+
+    # Plot other locations
+    other_lons = np.concatenate(other_lons)
+    other_lats = np.concatenate(other_lats)
+    ax.scatter(other_lons, other_lats, color='black', s=8, edgecolor='white', alpha=0.7, transform=ccrs.PlateCarree(), label='Other Locations')
+    ax.yaxis.set_tick_params(labelright=False)
+    ax.set_title(title)
+
+    # Optional: Add color bar for bathymetry
+    plt.colorbar(c, ax=ax, orientation='vertical', label='Depth (m)',shrink=0.3, pad=0.1)
+
+    plt.show()
+
+
+def  plot_ts_diagrams_anom_all_eddies(anomalyt, anomalys, xs, zs, t_grid, s_grid, sigma_grid, distance, depth, ind_Z, cruise, section_num, depth_max_N2, sub_section=None, e=0, ylimmax = 4, ylimmin = 3, xlimmax = 35, xlimmin = 34, inv_x=0, cmap='coolwarm', clabel="Celsius"):
+    original_cmap1 = plt.cm.Reds
+    # cmap1 = colors.ListedColormap(original_cmap1(np.linspace(0.4, 1, 256)))
+    col = ["blue", "orange", "green", "red", "purple", "brown", "yellow"]
+    original_cmap2 = plt.cm.Blues
+    cmap2 = colors.ListedColormap(original_cmap2(np.linspace(0.4, 1, 256)))
+    # Create subplots (3 subplots now: eddy plot, TS diagram with color maps, TS diagram with red/blue colors)
+    fig, axes = plt.subplots(1, 2, figsize=(18, 6))
+    ax1 = axes[0]
+    eddy_dict = get_eddies(section_num, cruise, sub_section=sub_section)
+    store_data = {}
+    for eddy_num in eddy_dict:
+        eddy_center_x, eddy_center_z, a, b = eddy_dict[eddy_num]
+        eddy_center = (eddy_center_x , eddy_center_z)
+
+        # Get symmetric max for normalization
+        abs_max = np.nanmax(np.abs(anomalyt))
+
+        saturate = 0.7
+
+        # Normalize centered at 0
+        n2 = Normalize(vmin=-saturate* abs_max, vmax=saturate* abs_max)
+
+        # Levels centered at 0
+        levels = np.linspace(-saturate* abs_max, saturate *abs_max, 101)
+        contour = ax1.contourf(
+            distance,
+            -1 * ind_Z,
+            anomalyt,
+            cmap='coolwarm',
+            levels=levels,
+            norm=n2,
+            extend='both'
+        )
+      
+        temp_eddy_3d, temp_eddy, sal_eddy, dens_eddy, zs_eddy, temp_other, sal_other, dens_other, zs_other = extract_eddy_data_anom(anomalyt, t_grid, s_grid, sigma_grid, xs, ind_Z, eddy_center, a, b, cruise=cruise, section_num=section_num, e=eddy_num, sub_section=sub_section)
+        plot_eddy_selected(ax1, xs, zs, contour, anomalyt, temp_eddy_3d, sigma_grid, distance, ind_Z, f"Eddies in {cruise} Section {section_num}", clabel, col[eddy_num], cruise, section_num, depth, inv_x=inv_x)
+        store_data[eddy_num] = (sal_eddy, temp_eddy, zs_eddy, sal_other, temp_other, zs_other)
+    
+    ax1.plot(distance, depth_max_N2.flatten(), color='hotpink', linewidth=3, label='Max $N^2$')
+    ax1.legend()
+    if cruise == "MSM74":
+        contour_levels = np.arange(23, 28, 0.1)
+    else:
+        if section_num == 1:
+            contour_levels = np.arange(26.8, 28, 0.2)
+        elif section_num == 7 and sub_section == 2:
+            contour_levels = np.arange(26.8, 28, 0.1)
+        else:
+            contour_levels = np.arange(26.2, 28, 0.2)
+    clines = ax1.contour(xs, zs, sigma_grid, levels=contour_levels, colors='k', linewidths=0.8)
+    ax1.clabel(clines, inline=True, fmt='%1.1f', fontsize=11)
+    if cruise == "MSM74":
+        ax1.set_ylim(0, 500)
+    else:
+        ax1.set_ylim(0, 300)
+
+    ax1.invert_yaxis()
+    # Plot 2: TS Diagram with color maps
+    ax2 = axes[1]
+    # possibles de S
+    SAL_diag = np.arange(30, 37, 0.01)
+    TEMP_diag = np.arange(-3, 20, 0.1)
+    SAL_diag, TEMP_diag = np.meshgrid(SAL_diag, TEMP_diag)
+    SIGMA0_diag = gsw.density.sigma0(SAL_diag, TEMP_diag)
+    Contourrange = np.arange(21, 38, 0.1)
+
+    CS = ax2.contour(SAL_diag, TEMP_diag, SIGMA0_diag, Contourrange, colors='k', linestyles=':', zorder=1)
+
+    ax2.clabel(CS, fontsize=11, manual=False)
+
+    for eddy_num in store_data:
+        sal_eddy, temp_eddy, zs_eddy, sal_other, temp_other, zs_other = store_data[eddy_num]
+
+        sc1 = ax2.scatter(sal_eddy, temp_eddy, c=col[eddy_num], marker='.', zorder=10)  # Intérieur (core of the eddy in red)
+        sc2 = ax2.scatter(sal_other, temp_other, c=zs_other, marker='.', cmap=cmap2)  # Extérieur gauche (reference profile in blue)
+
+    cb2 = plt.colorbar(sc2, ax=ax2)
+    cb2.set_label('Reference Profile Depth [m]')
+
+    # cb1.ax.invert_yaxis()
+    cb2.ax.invert_yaxis()
+
+
+    water_masses = {
+        "LSW" : (3.2, 0.7, 34.85, 0.1, 'orange'),
+        "SAIW": (3.62, 0.43, 34.994, 0.057, 'coral'),
+        # "MW" : (12, 0.5, 36.3, 0.2, 'darkgreen'),
+        "NEADW" : (3.5, 0.5, 35.7, 0.2, 'green'),
+        "AABW" : (-0.5, 0.5, 34.63, 0.2, 'magenta'),
+        # "EDW": (18, 0.5, 36.5, 0.2, 'darkcyan'),
+        "IBW": (7.5, 0.5, 35.125, 0.02, 'crimson'),
+        "RTW": (7.7, 0.3, 35.2, 0.02, 'indigo'),
+    }
+
+    dens_water_masses = {
+        "SPMW27.3" : (9.82, 0.8, 35.41, 0.083, 27.3, 0.05, 'darkblue'),
+        "SPMW27.4" : (8.64, 0.8, 35.29, 0.04, 27.4, 0.05, 'darkblue'),
+        "SPMW27.5" : (7.53, 0.5, 35.2, 0.09, 27.5, 0.05, 'darkblue'),
+        "DSOW" : (0.17, 1, 34.66, 0.08, 27.82, 0.05, 'darkgoldenrod'),
+        "AAIW" : (4, 0.5, 34.2, 0.1, 27.1, 0.05, 'blue'),
+        "ISOW" : (1.25, 1.75, 34.885, 0.015, 27.9, 0.1, 'purple'),
+        # "ISW": (3.4, 0.2, 35.02, 0.1, 27.74, 0.05, 'lightpink')
+    }
+
+    if section_num == 4 and cruise == 'MSM40':
+        water_masses["S4"] = (3.604, 1.680, 33.934, 0.709, 'darkgreen')
+
+    sal_min = float("inf")
+    sal_max = float("-inf")
+    temp_min = float("inf")
+    temp_max = float("-inf")
+
+    for eddy_num, (sal_eddy, temp_eddy, _, _, _, _) in store_data.items():
+        sal_min = min(sal_min, np.nanmin(sal_eddy))
+        sal_max = max(sal_max, np.nanmax(sal_eddy))
+        temp_min = min(temp_min, np.nanmin(temp_eddy))
+        temp_max = max(temp_max, np.nanmax(temp_eddy))
+
+
+    ymin = temp_min - 1
+    ymax = temp_max + 1
+    xmin = sal_min - 0.1
+    xmax = sal_max + 0.1
+
+    for name, (temp_mean, temp_std, sal_mean, sal_std, color) in water_masses.items():
+        if np.nanmin(temp_mean) > ymin and np.nanmax(temp_mean) < ymax and np.nanmin(sal_mean) > xmin and np.nanmax(sal_mean) < xmax:
+            ax2.fill_betweenx(
+                [temp_mean - temp_std, temp_mean + temp_std],
+                sal_mean - sal_std, sal_mean + sal_std,
+                color=color, alpha=0.3, label=name, zorder=10
+            )
+            ax2.text(sal_mean, temp_mean, name, fontsize=9, ha='center', va='center', color='black', fontweight='bold', zorder=10)
+
+
+    # Highlight only the specific regions along density contours for dens_water_masses
+    for name, (temp_mean, temp_std, sal_mean, sal_std, density, density_std, color) in dens_water_masses.items():
+    # Find the closest contour level to the given density
+        if np.nanmin(temp_mean) > ymin and np.nanmax(temp_mean) < ymax and np.nanmin(sal_mean) > xmin and np.nanmax(sal_mean) < xmax:
+            density_levels = np.array(CS.levels)  # Extract contour levels
+            closest_level = density_levels[np.abs(density_levels - density).argmin()]  # Find closest contour
+
+            # Get contour paths corresponding to the closest density level
+            for path in CS.collections[np.where(density_levels == closest_level)[0][0]].get_paths():
+                vertices = path.vertices
+                salinity_contour, temperature_contour = vertices[:, 0], vertices[:, 1]
+
+                # Find the part of the contour that is within the salinity and temperature range
+                mask = (
+                    (temperature_contour >= temp_mean - temp_std) & (temperature_contour <= temp_mean + temp_std) &
+                    (salinity_contour >= sal_mean - sal_std) & (salinity_contour <= sal_mean + sal_std)
+                )
+
+                # Highlight only the selected part of the contour
+                if np.any(mask):
+                    ax2.fill_betweenx(
+                        temperature_contour[mask],
+                        salinity_contour[mask] - sal_std,
+                        salinity_contour[mask] + sal_std,
+                        color=color, alpha=0.3, label=name, zorder=10
+                    )
+
+                    # Compute the midpoint for better label placement
+                    avg_sal = np.mean(salinity_contour[mask])
+                    avg_temp = np.mean(temperature_contour[mask])
+
+                    # Place the label slightly above the highlighted region
+                    ax2.text(
+                        avg_sal, avg_temp + 0.2,  # Shift label slightly upwards
+                        name, fontsize=9, ha='center', va='bottom', color='black', fontweight='bold', zorder=10
+                    )
+
+ 
+    # Labels and title
+    ax2.set_xlabel(r'$ {\rm Salinity \,  [} {\rm psu]}$', fontsize=15, rasterized=True)
+    ax2.set_ylabel(r'$ {\rm Temperature \,  [} {\rm °C]}$', fontsize=15, rasterized=True)
+    ax2.set_title(r'$\theta-S$ diagram', fontsize=20)
+    # xmin = 34.5
+    # xmax = 35.4
+    # ymin = 2
+    # ymax=5
+    ax2.set_ylim(ymin, ymax)
+    ax2.set_xlim(xmin, xmax)
+
+    # Add legends
+    ax2.legend(loc='lower right', fontsize='small')
+    ax1.tick_params(axis='both', which='major', labelsize=13)
+    ax2.tick_params(axis='both', which='major', labelsize=13)
 
     # Adjust layout and show the plot
     plt.tight_layout()
